@@ -3,7 +3,7 @@
  * Plugin Name: Posts Grid & Search Widgets
  * Plugin URI: https://example.com
  * Description: Advanced posts grid widget with search functionality, multiple templates, and customizable pagination.
- * Version: 1.0.0
+ * Version: 2.0.0
  * Author: Your Name
  * License: GPL v2 or later
  * Text Domain: posts-grid-search
@@ -17,11 +17,20 @@ if (!defined('ABSPATH')) {
 // Define plugin constants
 define('PGS_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('PGS_PLUGIN_PATH', plugin_dir_path(__FILE__));
-define('PGS_VERSION', '1.0.0');
+define('PGS_VERSION', '2.0.0');
 
 class PostsGridSearchPlugin {
     
-    public function __construct() {
+    private static $instance = null;
+    
+    public static function get_instance() {
+        if (null === self::$instance) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+    
+    private function __construct() {
         add_action('plugins_loaded', array($this, 'init'));
     }
     
@@ -39,9 +48,16 @@ class PostsGridSearchPlugin {
         // AJAX handlers
         add_action('wp_ajax_pgs_filter_posts', array($this, 'ajax_filter_posts'));
         add_action('wp_ajax_nopriv_pgs_filter_posts', array($this, 'ajax_filter_posts'));
+        
+        // Add Elementor templates support
+        add_action('init', array($this, 'register_elementor_support'));
     }
     
     public function register_widgets() {
+        require_once PGS_PLUGIN_PATH . 'includes/class-posts-grid-widget.php';
+        require_once PGS_PLUGIN_PATH . 'includes/class-search-filter-widget.php';
+        require_once PGS_PLUGIN_PATH . 'includes/class-template-manager.php';
+        
         register_widget('PGS_Posts_Grid_Widget');
         register_widget('PGS_Search_Filter_Widget');
     }
@@ -61,7 +77,15 @@ class PostsGridSearchPlugin {
         if ($hook === 'widgets.php') {
             wp_enqueue_style('pgs-admin-style', PGS_PLUGIN_URL . 'assets/css/admin.css', array(), PGS_VERSION);
             wp_enqueue_script('pgs-admin-script', PGS_PLUGIN_URL . 'assets/js/admin.js', array('jquery'), PGS_VERSION, true);
-            wp_enqueue_media(); // For icon selection
+            wp_enqueue_media();
+        }
+    }
+    
+    public function register_elementor_support() {
+        // Check if Elementor is active
+        if (did_action('elementor/loaded')) {
+            require_once PGS_PLUGIN_PATH . 'includes/class-elementor-integration.php';
+            new PGS_Elementor_Integration();
         }
     }
     
@@ -72,6 +96,7 @@ class PostsGridSearchPlugin {
         $posts_per_page = intval($_POST['posts_per_page']);
         $template = sanitize_text_field($_POST['template']);
         $page = intval($_POST['page']);
+        $widget_instance = isset($_POST['widget_instance']) ? $_POST['widget_instance'] : array();
         
         $args = array(
             'post_type' => 'post',
@@ -88,9 +113,10 @@ class PostsGridSearchPlugin {
         
         ob_start();
         if ($query->have_posts()) {
+            $template_manager = new PGS_Template_Manager();
             while ($query->have_posts()) {
                 $query->the_post();
-                $this->render_post_template($template);
+                $template_manager->render_post($template, $widget_instance);
             }
         } else {
             echo '<div class="pgs-no-posts">' . __('No posts found.', 'posts-grid-search') . '</div>';
@@ -102,64 +128,11 @@ class PostsGridSearchPlugin {
         wp_send_json_success(array(
             'posts' => $posts_html,
             'total_pages' => $query->max_num_pages,
-            'current_page' => $page
+            'current_page' => $page,
+            'total_posts' => $query->found_posts
         ));
-    }
-    
-    private function render_post_template($template) {
-        $post_id = get_the_ID();
-        $title = get_the_title();
-        $excerpt = get_the_excerpt();
-        $author = get_the_author();
-        $date = get_the_date();
-        $thumbnail = get_the_post_thumbnail($post_id, 'medium');
-        
-        switch ($template) {
-            case 'card':
-                echo '<div class="pgs-post-card">';
-                echo '<div class="pgs-post-thumbnail">' . $thumbnail . '</div>';
-                echo '<div class="pgs-post-content">';
-                echo '<h3 class="pgs-post-title">' . esc_html($title) . '</h3>';
-                echo '<p class="pgs-post-excerpt">' . esc_html($excerpt) . '</p>';
-                echo '<div class="pgs-post-meta">';
-                echo '<span class="pgs-post-author">By ' . esc_html($author) . '</span>';
-                echo '<span class="pgs-post-date">' . esc_html($date) . '</span>';
-                echo '</div>';
-                echo '</div>';
-                echo '</div>';
-                break;
-                
-            case 'list':
-                echo '<div class="pgs-post-list">';
-                echo '<div class="pgs-post-thumbnail">' . $thumbnail . '</div>';
-                echo '<div class="pgs-post-content">';
-                echo '<h3 class="pgs-post-title">' . esc_html($title) . '</h3>';
-                echo '<p class="pgs-post-excerpt">' . esc_html($excerpt) . '</p>';
-                echo '<div class="pgs-post-meta">';
-                echo '<span class="pgs-post-author">By ' . esc_html($author) . '</span>';
-                echo '<span class="pgs-post-date">' . esc_html($date) . '</span>';
-                echo '</div>';
-                echo '</div>';
-                echo '</div>';
-                break;
-                
-            case 'minimal':
-                echo '<div class="pgs-post-minimal">';
-                echo '<h3 class="pgs-post-title">' . esc_html($title) . '</h3>';
-                echo '<div class="pgs-post-meta">';
-                echo '<span class="pgs-post-author">By ' . esc_html($author) . '</span>';
-                echo '<span class="pgs-post-date">' . esc_html($date) . '</span>';
-                echo '</div>';
-                echo '</div>';
-                break;
-        }
     }
 }
 
 // Initialize the plugin
-new PostsGridSearchPlugin();
-
-// Include widget classes
-require_once PGS_PLUGIN_PATH . 'includes/class-posts-grid-widget.php';
-require_once PGS_PLUGIN_PATH . 'includes/class-search-filter-widget.php';
-require_once PGS_PLUGIN_PATH . 'includes/class-filters.php';
+PostsGridSearchPlugin::get_instance();
